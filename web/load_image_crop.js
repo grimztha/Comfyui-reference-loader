@@ -1353,6 +1353,18 @@ app.registerExtension({
                 return r;
             };
 
+            // Global mouseup / pointerup listener to ensure image crop drag states never stick
+            const onGlobalPointerUp = () => {
+                if (state.drag) {
+                    state.drag = null;
+                    const el = app.canvas?.canvas;
+                    if (el) el.style.cursor = "";
+                    node.setDirtyCanvas(true, true);
+                }
+            };
+            window.addEventListener("pointerup", onGlobalPointerUp);
+            window.addEventListener("mouseup", onGlobalPointerUp);
+
             // ─── Vue (Nodes 2.0) Help Button & Popup DOM Mirror ───
             function syncVueHelpUI(node, state) {
                 if (!isVueMode()) return;
@@ -2008,6 +2020,8 @@ app.registerExtension({
             node.onRemoved = function () {
                 const el = app.canvas?.canvas;
                 if (el) el.style.cursor = "";
+                window.removeEventListener("pointerup", onGlobalPointerUp);
+                window.removeEventListener("mouseup", onGlobalPointerUp);
                 window.removeEventListener("pointerdown", onGlobalPointerDown, true);
                 window.removeEventListener("keydown", onGlobalKeyDown, true);
                 removeVueHelpUI(node);

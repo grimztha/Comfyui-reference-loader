@@ -157,7 +157,10 @@ def _parse_crop(
     if not crop or width <= 0 or height <= 0:
         return None
     try:
-        data = json.loads(crop)
+        if isinstance(crop, dict):
+            data = crop
+        else:
+            data = json.loads(str(crop))
         x = float(data.get("x", 0))
         y = float(data.get("y", 0))
         w = float(data.get("w", data.get("width", 1)))
@@ -200,6 +203,8 @@ def fit_frames(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Fit [N, H, W, C] frames to target width and height using contain, cover, or stretch."""
     n, src_h, src_w, c = t.shape
+    if width <= 0 or height <= 0:
+        return t, torch.zeros((n, src_h, src_w), dtype=torch.float32, device=t.device)
     if src_h == height and src_w == width:
         return t, torch.zeros((n, height, width), dtype=torch.float32, device=t.device)
 
@@ -270,7 +275,7 @@ def _load_video_and_audio(
         vstream = container.streams.video[0]
         try:
             src_fps = float(vstream.average_rate or vstream.r_frame_rate or 24.0)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, ZeroDivisionError):
             src_fps = 24.0
         if src_fps <= 0 or not math.isfinite(src_fps):
             src_fps = 24.0
@@ -288,7 +293,10 @@ def _load_video_and_audio(
             try:
                 container.seek(seek_pts, stream=vstream)
             except Exception:
-                container.seek(0)
+                try:
+                    container.seek(0)
+                except Exception:
+                    pass
 
         raw_frames = []
         frame_idx = 0
@@ -329,7 +337,10 @@ def _load_video_and_audio(
                 break
 
         if not raw_frames:
-            container.seek(0)
+            try:
+                container.seek(0)
+            except Exception:
+                pass
             for frame in container.decode(vstream):
                 raw_frames.append(frame.to_ndarray(format="rgb24"))
                 if len(raw_frames) > MAX_DECODE_FRAMES:
@@ -398,9 +409,15 @@ def _load_video_and_audio(
                     try:
                         container.seek(pts, stream=astream)
                     except Exception:
-                        container.seek(0)
+                        try:
+                            container.seek(0)
+                        except Exception:
+                            pass
                 else:
-                    container.seek(0)
+                    try:
+                        container.seek(0)
+                    except Exception:
+                        pass
 
                 aframes = []
                 decoded_audio_sec = seek_audio_sec
@@ -428,7 +445,10 @@ def _load_video_and_audio(
                         break
 
                 if not aframes:
-                    container.seek(0)
+                    try:
+                        container.seek(0)
+                    except Exception:
+                        pass
                     for aframe in container.decode(astream):
                         buf = torch.from_numpy(aframe.to_ndarray())
                         if getattr(aframe.format, "is_planar", False):
@@ -460,7 +480,7 @@ def _load_video_and_audio(
                         int(round((rel_start_sec + duration_sec) * sr)),
                     )
 
-                    if start_samp < cat_wav.shape[-1]:
+                    if start_samp < cat_wav.shape[-1] and end_samp > start_samp:
                         trimmed_wav = cat_wav[:, :, start_samp:end_samp].contiguous()
                     else:
                         expected_len = max(1, int(round(duration_sec * sr)))
@@ -526,6 +546,20 @@ class LoadVideoCrop:
         "Single frame [1, H, W, 3] under the playhead.",
         "Comma-separated marker frame indices relative to output batch.",
     )
+
+    @staticmethod
+    def _normalize_video_arg(video):
+        """Extract a valid file string if video was passed as a dict."""
+        if isinstance(video, dict):
+            fn = video.get("filename") or video.get("name") or ""
+            sub = video.get("subfolder") or ""
+            t = video.get("type") or "input"
+            if sub:
+                fn = f"{sub}/{fn}"
+            if t and t != "input":
+                fn = f"{fn} [{t}]"
+            return fn
+        return video
 
     @classmethod
     def _list_video_files(cls, input_dir: str) -> list[str]:
@@ -689,6 +723,7 @@ class LoadVideoCrop:
         playhead: int = 0,
         **kwargs,
     ):
+        video = self._normalize_video_arg(video)
         if not video or video == "none":
             raise ValueError("LoadVideoCrop: No video file selected.")
 
@@ -777,8 +812,15 @@ class LoadVideoCrop:
                     pass
 
         # Megapixel limit
-        if max_megapixels > 0.0:
-            target_pixels = max_megapixels * 1024 * 1024
+        try:
+            max_mp = float(max_megapixels)
+            if not math.isfinite(max_mp) or max_mp <= 0:
+                max_mp = 0.0
+        except (TypeError, ValueError):
+            max_mp = 0.0
+
+        if max_mp > 0.0:
+            target_pixels = max_mp * 1024 * 1024
             curr_pixels = new_width * new_height
             if curr_pixels > target_pixels:
                 scale = (target_pixels / curr_pixels) ** 0.5
@@ -837,7 +879,7 @@ class LoadVideoCrop:
         markers_str = ", ".join(str(m) for m in parsed_markers)
 
         # Silent audio fallback if source video had no audio track
-        if audio is None:
+        if audio is None or audio.get("waveform") is None or audio["waveform"].shape[-1] == 0:
             try:
                 silent_samples = max(1, int(round(duration * 44100)))
             except (TypeError, ValueError, OverflowError):
@@ -884,6 +926,7 @@ class LoadVideoCrop:
         playhead: int = 0,
         **kwargs,
     ) -> str:
+        video = cls._normalize_video_arg(video)
         if not video:
             return ""
         try:
@@ -908,7 +951,10 @@ class LoadVideoCrop:
             )
             return m.digest().hex()
         except Exception:
-            return f"{video}:{start_frame}:{frame_count}:{fps}:{model_quantize}:{crop}:{playhead}"
+            return (
+                f"{video}:{start_frame}:{frame_count}:{fps}:{model_quantize}:{quantize_n}:"
+                f"{aspect_ratio}:{max_megapixels}:{divisible_by}:{fit}:{crop}:{markers}:{playhead}"
+            )
 
     @classmethod
     def VALIDATE_INPUTS(
@@ -928,8 +974,11 @@ class LoadVideoCrop:
         playhead: int = 0,
         **kwargs,
     ):
-        if not video or not isinstance(video, str):
+        video = cls._normalize_video_arg(video)
+        if not video:
             return "No video file selected"
-        if not folder_paths.exists_annotated_filepath(video):
+        if not isinstance(video, str) or not folder_paths.exists_annotated_filepath(
+            video
+        ):
             return f"Invalid video file: {video}"
         return True

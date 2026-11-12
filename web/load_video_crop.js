@@ -796,7 +796,7 @@ app.registerExtension({
             function generateWaveformPeaks(numBuckets = 300) {
                 if (!state.audioBuffer) return;
                 const channelData = state.audioBuffer.getChannelData(0);
-                const step = Math.floor(channelData.length / numBuckets);
+                const step = Math.max(1, Math.floor(channelData.length / numBuckets));
                 const peaks = new Float32Array(numBuckets);
                 for (let i = 0; i < numBuckets; i++) {
                     const start = i * step;
@@ -824,6 +824,7 @@ app.registerExtension({
                 state.thumbnails = [];
 
                 let isCleanedUp = false;
+                let seekTimer = null;
                 const offVideo = document.createElement("video");
                 offVideo.preload = "auto";
                 offVideo.crossOrigin = "anonymous";
@@ -832,6 +833,10 @@ app.registerExtension({
                 const cleanupOffVideo = () => {
                     if (isCleanedUp) return;
                     isCleanedUp = true;
+                    if (seekTimer) {
+                        clearTimeout(seekTimer);
+                        seekTimer = null;
+                    }
                     try {
                         offVideo.pause();
                         offVideo.onloadedmetadata = null;
@@ -878,10 +883,20 @@ app.registerExtension({
                                 return;
                             }
                             const targetTime = currentIdx * stepSec;
+                            if (seekTimer) clearTimeout(seekTimer);
+                            seekTimer = setTimeout(() => {
+                                if (seq !== state.thumbSeq) return;
+                                currentIdx++;
+                                captureNext();
+                            }, 1000);
                             offVideo.currentTime = targetTime;
                         }
 
                         offVideo.addEventListener("seeked", () => {
+                            if (seekTimer) {
+                                clearTimeout(seekTimer);
+                                seekTimer = null;
+                            }
                             if (seq !== state.thumbSeq) {
                                 cleanupOffVideo();
                                 return;

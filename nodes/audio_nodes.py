@@ -50,7 +50,10 @@ def _load_audio_file(filepath, start_sec: float = 0.0, end_sec: float = 0.0):
                     try:
                         container.seek(int(max(0.0, start_sec - 0.5) * 1_000_000))
                     except Exception:
-                        container.seek(0)
+                        try:
+                            container.seek(0)
+                        except Exception:
+                            pass
 
                 frames = []
                 first_pts_sec = None
@@ -60,12 +63,13 @@ def _load_audio_file(filepath, start_sec: float = 0.0, end_sec: float = 0.0):
                         if frame.pts is not None and stream.time_base
                         else None
                     )
-                    if start_sec > 0.0:
+                    has_crop = (start_sec > 0.0) or (end_sec > 0.0)
+                    if has_crop:
                         if pts_sec is None:
                             # No timestamps: windowing is unreliable, fall back
                             # to a full decode in one of the backends below.
                             break
-                        if pts_sec < start_sec - 0.1:
+                        if start_sec > 0.0 and pts_sec < start_sec - 0.1:
                             continue
                         if end_sec > 0.0 and pts_sec > end_sec + 0.1:
                             break
@@ -89,14 +93,14 @@ def _load_audio_file(filepath, start_sec: float = 0.0, end_sec: float = 0.0):
                     elif wav.dim() == 2:
                         wav = wav.unsqueeze(0)
                     # Trim to the exact window using the first frame's PTS.
-                    if start_sec > 0.0 and first_pts_sec is not None:
-                        lead = max(0.0, start_sec - first_pts_sec)
+                    if (start_sec > 0.0 or end_sec > 0.0) and first_pts_sec is not None:
+                        lead = max(0.0, start_sec - first_pts_sec) if start_sec > 0.0 else 0.0
                         drop = int(round(lead * sr))
-                        if drop > 0:
-                            wav = wav[:, :, drop:]
                         if end_sec > 0.0:
-                            keep = max(0, int(round((end_sec - first_pts_sec) * sr)))
-                            wav = wav[:, :, :keep]
+                            keep = max(drop, int(round((end_sec - first_pts_sec) * sr)))
+                            wav = wav[:, :, drop:keep]
+                        elif drop > 0:
+                            wav = wav[:, :, drop:]
                     return wav, int(sr)
     except Exception:
         pass
@@ -369,8 +373,13 @@ class LoadAudioCrop:
                     (out_waveform.shape[-1] / sample_rate) if sample_rate > 0 else 0.0
                 )
             else:
+                channels = (
+                    waveform.shape[1]
+                    if waveform.dim() >= 2 and waveform.shape[1] > 0
+                    else 2
+                )
                 out_waveform = torch.zeros(
-                    (1, waveform.shape[1], 1), dtype=torch.float32
+                    (1, channels, 1), dtype=torch.float32
                 )
                 out_duration = 0.0
 

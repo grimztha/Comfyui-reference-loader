@@ -18,7 +18,10 @@ def _parse_crop(crop, width, height):
     if not crop or width <= 0 or height <= 0:
         return None
     try:
-        data = json.loads(crop)
+        if isinstance(crop, dict):
+            data = crop
+        else:
+            data = json.loads(str(crop))
         x = float(data.get("x", 0))
         y = float(data.get("y", 0))
         w = float(data.get("w", data.get("width", 1)))
@@ -79,14 +82,64 @@ class LoadImageCrop:
         "Output image height in pixels.",
     )
 
+    @staticmethod
+    def _normalize_image_arg(image):
+        """Extract a valid file string if image was passed as a dict."""
+        if isinstance(image, dict):
+            fn = image.get("filename") or image.get("name") or ""
+            sub = image.get("subfolder") or ""
+            t = image.get("type") or "input"
+            if sub:
+                fn = f"{sub}/{fn}"
+            if t and t != "input":
+                fn = f"{fn} [{t}]"
+            return fn
+        return image
+
+    @classmethod
+    def _list_image_files(cls, input_dir):
+        """List image files in input directory."""
+        if not os.path.exists(input_dir):
+            return []
+        try:
+            files = [
+                f
+                for f in os.listdir(input_dir)
+                if os.path.isfile(os.path.join(input_dir, f))
+            ]
+        except OSError:
+            files = []
+        filter_fn = getattr(folder_paths, "filter_files_content_types", None)
+        if filter_fn is not None:
+            try:
+                return filter_fn(files, ["image"])
+            except Exception:
+                pass
+        IMAGE_EXTS = (
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+            ".bmp",
+            ".tiff",
+            ".tif",
+            ".gif",
+            ".tga",
+            ".avif",
+        )
+        return [f for f in files if f.lower().endswith(IMAGE_EXTS)]
+
     @classmethod
     def INPUT_TYPES(cls):
-        input_dir = folder_paths.get_input_directory()
-        files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
-        files = folder_paths.filter_files_content_types(files, ["image"])
+        try:
+            input_dir = folder_paths.get_input_directory()
+            os.makedirs(input_dir, exist_ok=True)
+            files = sorted(cls._list_image_files(input_dir))
+        except Exception:
+            files = []
         return {
             "required": {
-                "image": (sorted(files), {
+                "image": (files, {
                     "image_upload": True,
                     "tooltip": "The image file to load. Upload, drag & drop, or pick an existing input file.",
                 }),
@@ -110,6 +163,7 @@ class LoadImageCrop:
         }
 
     def load(self, image, crop="", aspect_ratio="None", max_megapixels=0.0, divisible_by="disabled", **kwargs):
+        image = self._normalize_image_arg(image)
         if not image or image == "none":
             raise ValueError("LoadImageCrop: No image file selected.")
         image_path = folder_paths.get_annotated_filepath(image)
@@ -163,8 +217,15 @@ class LoadImageCrop:
         height, width = images.shape[1], images.shape[2]
         new_width, new_height = width, height
 
-        if max_megapixels > 0:
-            target = max_megapixels * 1024 * 1024
+        try:
+            max_mp = float(max_megapixels)
+            if not math.isfinite(max_mp) or max_mp <= 0:
+                max_mp = 0.0
+        except (TypeError, ValueError):
+            max_mp = 0.0
+
+        if max_mp > 0:
+            target = max_mp * 1024 * 1024
             current = width * height
             if current > target:
                 scale = (target / current) ** 0.5
@@ -199,6 +260,7 @@ class LoadImageCrop:
 
     @classmethod
     def IS_CHANGED(cls, image, crop="", aspect_ratio="None", max_megapixels=0.0, divisible_by="disabled", **kwargs):
+        image = cls._normalize_image_arg(image)
         if not image:
             return ""
         try:
@@ -225,9 +287,12 @@ class LoadImageCrop:
 
     @classmethod
     def VALIDATE_INPUTS(cls, image, crop="", aspect_ratio="None", max_megapixels=0.0, divisible_by="disabled", **kwargs):
-        if not image or not isinstance(image, str):
+        image = cls._normalize_image_arg(image)
+        if not image:
             return "No image file selected"
-        if not folder_paths.exists_annotated_filepath(image):
+        if not isinstance(image, str) or not folder_paths.exists_annotated_filepath(
+            image
+        ):
             return f"Invalid image file: {image}"
         return True
 
@@ -276,12 +341,19 @@ class DownscaleImageToMegapixels:
         elif image.dim() != 4 or image.shape[0] == 0:
             return (image,)
 
+        try:
+            mp = float(megapixels)
+            if not math.isfinite(mp) or mp <= 0:
+                return (image,)
+        except (TypeError, ValueError):
+            return (image,)
+
         import comfy.utils
 
         height, width = image.shape[1], image.shape[2]
         if width <= 0 or height <= 0:
             return (image,)
-        target = megapixels * 1024 * 1024
+        target = mp * 1024 * 1024
         current = width * height
         if current <= target:
             return (image,)
