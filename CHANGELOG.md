@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2026-11-12
+
+### Fixed
+- **Dictionary Input Normalization**: Added dictionary argument normalization (`_normalize_image_arg` and `_normalize_video_arg`) to `LoadImageCrop` and `LoadVideoCrop` across `load()`, `IS_CHANGED()`, and `VALIDATE_INPUTS()`, preventing `AttributeError: 'dict' object has no attribute 'endswith'` when executed via API or standard upload widgets.
+- **Dictionary Crop Box Deserialization**: Handled pre-parsed `dict` objects in `_parse_crop()` across `image_nodes.py` and `video_nodes.py` to support programmatic API executions.
+- **Directory Listing Resilience**: Added `_list_image_files()` with standard image extension fallbacks, automatic directory creation (`os.makedirs`), and `try...except` handling to prevent startup crashes when the ComfyUI input directory does not yet exist.
+- **Video & Audio Decoder Robustness**: Guarded against `ZeroDivisionError` when parsing stream frame rates, safely wrapped container seek fallbacks, and prevented downstream crashes caused by 0-sample audio tensors.
+- **Audio Decoding Window Trimming**: Fixed window slice math in `_load_audio_file` to ensure cropped audio returns the exact requested duration, and enabled early break when only `end_sec` is specified.
+- **Dimension & Megapixel Clamping**: Prevented complex number crashes on negative megapixel inputs in `DownscaleImageToMegapixels`, and guarded against negative/zero dimension tensor allocations in `fit_frames()`.
+- **Sticky Drag State in Image Crop**: Added global `window` pointerup and mouseup listeners to release drag states when releasing the mouse button outside the canvas or node.
+- **Short Audio Waveform & Thumbnail Watchdog**: Clamped waveform bucket steps to prevent division underflow on short audio tracks, and added a seek timeout watchdog in video thumbnail generation.
+
+---
+
 ## [1.1.5] - 2026-10-10
 
 ### Fixed
