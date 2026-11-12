@@ -1565,25 +1565,76 @@ app.registerExtension({
                     }
                 }
 
-                // 2. Widgets container flex
+                // 2. Widgets container flex & row track distribution
                 if (widgetsDiv) {
                     widgetsDiv.style.flex = "1 1 0%";
                     widgetsDiv.style.minHeight = "0";
+
+                    // Locate the direct row container of widgetsDiv that hosts our canvas
+                    let customRow = canvasContainer;
+                    while (customRow && customRow.parentElement !== widgetsDiv) {
+                        customRow = customRow.parentElement;
+                    }
+
+                    if (customRow && customRow.parentElement === widgetsDiv) {
+                        const rows = Array.from(widgetsDiv.children);
+                        const customRowIndex = rows.indexOf(customRow);
+                        if (customRowIndex !== -1) {
+                            const templateRows = rows
+                                .map((_, idx) =>
+                                    idx === customRowIndex ? "1fr" : "min-content",
+                                )
+                                .join(" ");
+                            widgetsDiv.style.gridTemplateRows = templateRows;
+
+                            customRow.style.height = "100%";
+                            customRow.style.alignSelf = "stretch";
+                        }
+                    }
                 }
 
-                // 3. Canvas container & vertical centering
+                // 3. Center widget wrapper vertically and horizontally within the expanded 1fr track
+                const widgetWrapper = canvasContainer.parentElement;
+                if (widgetWrapper) {
+                    widgetWrapper.style.height = "100%";
+                    widgetWrapper.style.width = "100%";
+                    widgetWrapper.style.display = "flex";
+                    widgetWrapper.style.flexDirection = "column";
+                    widgetWrapper.style.justifyContent = "center";
+                    widgetWrapper.style.alignItems = "center";
+                }
+
+                const nodeWidget = canvasContainer.closest?.('[data-testid="node-widget"]');
+                if (nodeWidget) {
+                    nodeWidget.style.height = "100%";
+                    nodeWidget.style.alignSelf = "stretch";
+                }
+
                 canvasContainer.style.display = "flex";
                 canvasContainer.style.flexDirection = "column";
                 canvasContainer.style.justifyContent = "center";
                 canvasContainer.style.alignItems = "center";
-                canvasContainer.style.overflow = "hidden";
-                canvasContainer.style.flex = "1 1 0%";
-                canvasContainer.style.minHeight = "0";
+                canvasContainer.style.marginLeft = "0px";
+                canvasContainer.style.marginRight = "0px";
+                canvasContainer.style.width = "100%";
                 canvasContainer.style.boxSizing = "border-box";
 
                 canvas.style.position = "relative";
-                canvas.style.margin = "auto 0";
+                canvas.style.margin = "auto";
                 canvas.style.top = "0px";
+                canvas.style.left = "0px";
+
+                // 4. Attach resize observer on body to keep centering synced on live user resize
+                if (!node._vueLayoutResizeObserver && typeof ResizeObserver !== "undefined") {
+                    node._vueLayoutResizeObserver = new ResizeObserver(() => {
+                        if (isVueMode()) {
+                            requestAnimationFrame(() => {
+                                syncVueNodeLayout(ctx, node);
+                            });
+                        }
+                    });
+                    node._vueLayoutResizeObserver.observe(body);
+                }
             }
 
             // Outside click & Escape handlers
@@ -2018,6 +2069,8 @@ app.registerExtension({
 
             const origOnRemoved = node.onRemoved;
             node.onRemoved = function () {
+                node._vueLayoutResizeObserver?.disconnect?.();
+                node._vueLayoutResizeObserver = null;
                 const el = app.canvas?.canvas;
                 if (el) el.style.cursor = "";
                 window.removeEventListener("pointerup", onGlobalPointerUp);
