@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2026-11-12
+
+### Fixed
+- **Nodes 2.0 (Vue Mode) Canvas Centering & Dynamic Row Sizing**: Adjusted `syncVueNodeLayout` across `load_audio_crop.js`, `load_image_crop.js`, and `load_video_crop.js` to dynamically distribute `gridTemplateRows` (`1fr` for the custom canvas widget row and `min-content` for remaining rows), expanding the widget container to full available height without vertical clipping or displacement.
+- **Live Resize Synchronization & Cleanup**: Added a dedicated `ResizeObserver` on the node body in Vue mode to maintain canvas centering and layout positioning dynamically during interactive user resizing, and ensured observer cleanup on `node.onRemoved`.
+
+---
+
 ## [1.1.6] - 2026-11-12
 
 ### Fixed
